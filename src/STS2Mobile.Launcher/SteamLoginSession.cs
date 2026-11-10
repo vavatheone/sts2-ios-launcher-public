@@ -7,9 +7,9 @@ using STS2Mobile.Steam.Connection;
 namespace STS2Mobile.Launcher;
 
 /// <summary>
-/// Steam sign-in and ownership verification for the launcher. Only a refresh token is ever stored,
-/// in protected storage. A password is handed straight to SteamKit, which encrypts it for Steam; it
-/// is never stored or logged here.
+/// Steam sign-in and ownership verification for the launcher. The refresh token and, after successful
+/// ownership verification, the Steam identity are stored in protected storage. A password is handed
+/// straight to SteamKit, which encrypts it for Steam; it is never stored or logged here.
 /// </summary>
 public sealed class SteamLoginSession : IDisposable
 {
