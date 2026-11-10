@@ -146,7 +146,10 @@ public partial class Launcher : Control
         _view.ShowProgress("Verifying Steam ownership...", -1, canGoBack: true);
     }
 
-    private void Play() => RunAsync(_view.Step == null ? null : SetupStep.Play, "Verifying Steam ownership...", _login.ConnectAndVerifyAsync, StartGameAsync).FireAndForget("Play");
+    private void Play() => RunAsync(_view.Step == null ? null : SetupStep.Play,
+        _login.HasCachedOwnership ? "Starting the game..." : "Verifying Steam ownership...",
+        _login.HasCachedOwnership ? _ => Task.CompletedTask : _login.ConnectAndVerifyAsync,
+        StartGameAsync).FireAndForget("Play");
 
     /// <summary>Makes the game's assembly and pack from what is in the folder, offering to try again if that fails.</summary>
     private async Task<PreparationResult> PrepareGameAsync()
@@ -375,12 +378,14 @@ public partial class Launcher : Control
 
     private async Task StartGameAsync(CancellationToken attempt)
     {
-        await _saves.OfferAsync(attempt);
+        // A connection already made for the initial ownership check may offer Cloud saves as before.
+        // A cached/offline launch must never wait for Steam Cloud before entering the game.
+        if (_login.IsConnected) await _saves.OfferAsync(attempt);
         _view.ShowProgress("Starting the game...", -1);
         RuntimeServices.BindOwnershipVerifier(() => _login.VerifyOwnershipAsync(_stop.Token));
         RuntimeServices.BindAccount(_login.SteamId, _login.PlayerName);
         // Steam lobbies for a built-in multiplayer mod. Binding sends nothing; the first lobby request connects.
-        _lobbies = new SteamLobbies(_login.Connection, _login.SteamId, GodotSteamLogger.Instance);
+        _lobbies = new SteamLobbies(_login.GetConnectionForServices(), _login.SteamId, GodotSteamLogger.Instance);
         RuntimeServices.BindLobbies(_lobbies);
         SessionStats.Mark("game-start");
         try
@@ -400,6 +405,7 @@ public partial class Launcher : Control
         }
         _gameStarted = true;
         _view.Hide();
+        CheckVersionsInBackgroundAsync().FireAndForget("Background Steam version check");
         GD.Print("The game reached its main menu.");
         SessionStats.Mark("main-menu");
     }

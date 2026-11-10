@@ -7,9 +7,9 @@ using STS2Mobile.Steam.Connection;
 namespace STS2Mobile.Launcher;
 
 /// <summary>
-/// Steam sign-in and ownership verification for the launcher. Only a refresh token is ever stored,
-/// in protected storage. A password is handed straight to SteamKit, which encrypts it for Steam; it
-/// is never stored or logged here.
+/// Steam sign-in and ownership verification for the launcher. The refresh token and, after successful
+/// ownership verification, the Steam identity are stored in protected storage. A password is handed
+/// straight to SteamKit, which encrypts it for Steam; it is never stored or logged here.
 /// </summary>
 public sealed class SteamLoginSession : IDisposable
 {
@@ -38,7 +38,20 @@ public sealed class SteamLoginSession : IDisposable
 
     public SteamConnection Connection => _connection ?? throw new InvalidOperationException("Not signed in.");
 
-    public ulong SteamId => Connection.Client.SteamID?.ConvertToUInt64() ?? throw new InvalidOperationException("No authenticated Steam ID.");
+    /// <summary>Creates the Steam service object without connecting; online services connect only when first used.</summary>
+    public SteamConnection GetConnectionForServices()
+    {
+        if (!_credentials.HasCredentials) throw new InvalidOperationException("Steam sign-in required.");
+        return _connection ??= new SteamConnection(_credentials.AccountName!, _credentials.RefreshToken!, _logger);
+    }
+
+    public bool HasCachedOwnership => _credentials.HasVerifiedOwnership;
+
+    public bool IsConnected => _connection?.IsConnected == true;
+
+    public ulong SteamId => _credentials.VerifiedSteamId
+        ?? Connection.Client.SteamID?.ConvertToUInt64()
+        ?? throw new InvalidOperationException("No authenticated Steam ID.");
 
     public string AccountName => _credentials.AccountName ?? throw new InvalidOperationException("Not signed in.");
 
@@ -46,7 +59,7 @@ public sealed class SteamLoginSession : IDisposable
     /// The name the game shows for the local player: the account's Steam name, as other players see it, or the sign-in's account
     /// name if Steam has not sent it.
     /// </summary>
-    public string PlayerName => Connection.PersonaName ?? AccountName;
+    public string PlayerName => _credentials.VerifiedPlayerName ?? Connection.PersonaName ?? AccountName;
 
     public bool HasStoredCredentials => _credentials.HasCredentials;
 
@@ -136,7 +149,10 @@ public sealed class SteamLoginSession : IDisposable
     }
 
     public Task<bool> VerifyOwnershipAsync(CancellationToken cancellationToken) =>
-        OwnershipVerifier.VerifyAsync(Connection).WaitAsync(cancellationToken);
+        HasCachedOwnership ? Task.FromResult(true) : VerifyLiveOwnershipAsync(cancellationToken);
+
+    private Task<bool> VerifyLiveOwnershipAsync(CancellationToken cancellationToken) =>
+        OwnershipVerifier.VerifyAsync(GetConnectionForServices()).WaitAsync(cancellationToken);
 
     public async Task ConnectAndVerifyAsync(CancellationToken cancellationToken)
     {
@@ -145,30 +161,37 @@ public sealed class SteamLoginSession : IDisposable
         bool owns;
         for (int attempt = 1; ; attempt++)
         {
-            _connection?.Dispose();
-            _connection = new SteamConnection(_credentials.AccountName!, _credentials.RefreshToken!, _logger);
+            _connection ??= new SteamConnection(_credentials.AccountName!, _credentials.RefreshToken!, _logger);
             try
             {
                 // The connection's first sign-in blocks its caller; keep it off the UI thread.
                 // Connecting can hold that thread for its whole timeout, and Back should not wait for it.
-                owns = await Task.Run(() => VerifyOwnershipAsync(cancellationToken), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+                owns = await Task.Run(() => VerifyLiveOwnershipAsync(cancellationToken), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
                 break;
             }
             // A server that does not answer says nothing about the account or the network: the next connection tries another.
             catch (TimeoutException) when (attempt < ConnectAttempts)
             {
+                _connection?.Dispose();
+                _connection = null;
                 _logger.Info("Connection", "Steam did not answer; retrying");
             }
             // Steam sometimes answers a valid sign-in by sending the client to another of its servers.
             // That says nothing about the account, so it is retried instead of shown as a failure.
             catch (SteamLoginFailedException busy) when (IsServerBusy(busy.Result) && attempt < ConnectAttempts)
             {
+                _connection?.Dispose();
+                _connection = null;
                 _logger.Info("Connection", "Steam asked for another server (" + busy.Result + "); retrying");
                 await Task.Delay(TimeSpan.FromSeconds(attempt), cancellationToken).ConfigureAwait(false);
             }
         }
         if (!owns) throw new UnauthorizedAccessException("The signed-in Steam account does not own Slay the Spire 2.");
-        if (SteamId == 0) throw new InvalidOperationException("Steam did not provide an authenticated account identity.");
+        ulong steamId = Connection.Client.SteamID?.ConvertToUInt64()
+            ?? throw new InvalidOperationException("Steam did not provide an authenticated account identity.");
+        string playerName = Connection.PersonaName ?? AccountName;
+        if (!_credentials.SaveVerifiedIdentity(steamId, playerName))
+            _logger.Warn("Credentials", "Steam ownership was verified, but the identity could not be persisted for offline launch.");
     }
 
     /// <summary>

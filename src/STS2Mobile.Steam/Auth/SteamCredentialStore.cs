@@ -25,6 +25,13 @@ public sealed class SteamCredentialStore
 
     public bool HasCredentials => _credentials is { AccountName: not null, RefreshToken: not null };
 
+    /// <summary>A locally retained identity whose game ownership was successfully verified by Steam.</summary>
+    public bool HasVerifiedOwnership => _credentials is { OwnershipVerified: true, SteamId: > 0, PlayerName: not null };
+
+    public ulong? VerifiedSteamId => HasVerifiedOwnership ? _credentials!.SteamId : null;
+
+    public string? VerifiedPlayerName => HasVerifiedOwnership ? _credentials!.PlayerName : null;
+
     public void Load()
     {
         if (!File.Exists(_path)) return;
@@ -52,6 +59,26 @@ public sealed class SteamCredentialStore
     public bool Save(string accountName, string refreshToken)
     {
         var credentials = new SteamCredentials { AccountName = accountName, RefreshToken = refreshToken };
+        return Write(credentials);
+    }
+
+    /// <summary>Persists the identity only after Steam has confirmed ownership of the game.</summary>
+    public bool SaveVerifiedIdentity(ulong steamId, string playerName)
+    {
+        if (steamId == 0 || string.IsNullOrWhiteSpace(playerName) || !HasCredentials) return false;
+        var credentials = new SteamCredentials
+        {
+            AccountName = _credentials!.AccountName,
+            RefreshToken = _credentials.RefreshToken,
+            SteamId = steamId,
+            PlayerName = playerName,
+            OwnershipVerified = true
+        };
+        return Write(credentials);
+    }
+
+    private bool Write(SteamCredentials credentials)
+    {
         string temporary = $"{_path}.{Guid.NewGuid():N}.tmp";
         try
         {
@@ -115,5 +142,12 @@ public sealed class SteamCredentialStore
         public string? AccountName { get; set; }
 
         public string? RefreshToken { get; set; }
+
+        // Optional for backward compatibility with credential files written by older app versions.
+        public ulong? SteamId { get; set; }
+
+        public string? PlayerName { get; set; }
+
+        public bool OwnershipVerified { get; set; }
     }
 }

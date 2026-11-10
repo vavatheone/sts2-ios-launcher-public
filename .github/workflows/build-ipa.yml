@@ -10,6 +10,8 @@ name: Build IPA
 on:
   workflow_dispatch:
   push:
+    # This fork-only feature branch produces a standalone IPA; main remains untouched.
+    branches: ["offline-launch-cache"]
     tags: ["v*"]
 
 permissions:
@@ -29,7 +31,7 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
       # One bundle id per fork, so an update through AltStore or SideStore keeps the sign-in and the game.
       # Sideloaders may still change it to suit a free Apple ID; the app works under any id.
-      BUNDLE_ID: io.github.${{ github.repository_owner }}.sts2mobile
+      BUNDLE_ID: io.github.${{ github.repository_owner }}.sts2mobile.offline
       STS2_APP_BUILD: ${{ github.run_number }}
     defaults:
       run:
@@ -93,7 +95,7 @@ jobs:
       - name: Upload the IPA
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: STS2Mobile-unsigned-ipa
+          name: STS2Mobile-Offline-unsigned-ipa
           path: analysis/full-game-mono/FullGame.ipa
           if-no-files-found: error
           compression-level: 0

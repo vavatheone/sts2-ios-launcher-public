@@ -12,7 +12,7 @@ namespace STS2Mobile.FullGame;
 
 /// <summary>
 /// The game version: what the home screen's row says, the version screen with Steam's current builds, and Update and Switch.
-/// Steam is asked only when the player opens the screen; nothing is downloaded until they confirm.
+/// Steam is checked after play starts in the background and when the player opens the screen; nothing is downloaded until they confirm.
 /// </summary>
 public partial class Launcher
 {
@@ -29,6 +29,30 @@ public partial class Launcher
         if (Installed is not { } installed) return default;
         string branch = InstalledBuild.BranchName(installed.Branch);
         return (installed.Version, branch.Length > 0 ? branch : null, VersionScreen.IsUpdateAvailable(installed, SteamBuildsSeen.Read(LauncherFolder)));
+    }
+
+    /// <summary>
+    /// Checks Steam's builds after the game has reached its main menu. This is deliberately detached from startup:
+    /// offline play is already running, and a failed or unavailable Steam request changes nothing.
+    /// </summary>
+    private async Task CheckVersionsInBackgroundAsync()
+    {
+        try
+        {
+            CancellationToken cancellationToken = _stop.Token;
+            await _login.ConnectAndVerifyAsync(cancellationToken);
+            BuildsOnSteam builds = await _install.ReadBuildsAsync(cancellationToken);
+            try { SteamBuildsSeen.Write(LauncherFolder, builds); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                GD.PushError("Steam's background builds could not be kept: " + error.Message);
+            }
+        }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
+        catch (Exception error)
+        {
+            GD.Print("Background Steam version check skipped: " + error.GetType().Name + ": " + error.Message);
+        }
     }
 
     /// <summary>The Game version row: asks Steam which builds it has now, then shows the version screen, with the game here even if Steam cannot be reached.</summary>
