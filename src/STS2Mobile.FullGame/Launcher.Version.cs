@@ -12,7 +12,7 @@ namespace STS2Mobile.FullGame;
 
 /// <summary>
 /// The game version: what the home screen's row says, the version screen with Steam's current builds, and Update and Switch.
-/// Steam is asked only when the player opens the screen; nothing is downloaded until they confirm.
+/// Steam is checked after play starts in the background and when the player opens the screen; nothing is downloaded until they confirm.
 /// </summary>
 public partial class Launcher
 {
