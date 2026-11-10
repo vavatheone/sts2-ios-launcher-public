@@ -159,8 +159,7 @@ public sealed class SteamLoginSession : IDisposable
         bool owns;
         for (int attempt = 1; ; attempt++)
         {
-            _connection?.Dispose();
-            _connection = new SteamConnection(_credentials.AccountName!, _credentials.RefreshToken!, _logger);
+            _connection ??= new SteamConnection(_credentials.AccountName!, _credentials.RefreshToken!, _logger);
             try
             {
                 // The connection's first sign-in blocks its caller; keep it off the UI thread.
@@ -171,12 +170,16 @@ public sealed class SteamLoginSession : IDisposable
             // A server that does not answer says nothing about the account or the network: the next connection tries another.
             catch (TimeoutException) when (attempt < ConnectAttempts)
             {
+                _connection?.Dispose();
+                _connection = null;
                 _logger.Info("Connection", "Steam did not answer; retrying");
             }
             // Steam sometimes answers a valid sign-in by sending the client to another of its servers.
             // That says nothing about the account, so it is retried instead of shown as a failure.
             catch (SteamLoginFailedException busy) when (IsServerBusy(busy.Result) && attempt < ConnectAttempts)
             {
+                _connection?.Dispose();
+                _connection = null;
                 _logger.Info("Connection", "Steam asked for another server (" + busy.Result + "); retrying");
                 await Task.Delay(TimeSpan.FromSeconds(attempt), cancellationToken).ConfigureAwait(false);
             }
