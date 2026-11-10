@@ -31,6 +31,30 @@ public partial class Launcher
         return (installed.Version, branch.Length > 0 ? branch : null, VersionScreen.IsUpdateAvailable(installed, SteamBuildsSeen.Read(LauncherFolder)));
     }
 
+    /// <summary>
+    /// Checks Steam's builds after the game has reached its main menu. This is deliberately detached from startup:
+    /// offline play is already running, and a failed or unavailable Steam request changes nothing.
+    /// </summary>
+    private async Task CheckVersionsInBackgroundAsync()
+    {
+        try
+        {
+            CancellationToken cancellationToken = _stop.Token;
+            await _login.ConnectAndVerifyAsync(cancellationToken);
+            BuildsOnSteam builds = await _install.ReadBuildsAsync(cancellationToken);
+            try { SteamBuildsSeen.Write(LauncherFolder, builds); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                GD.PushError("Steam's background builds could not be kept: " + error.Message);
+            }
+        }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
+        catch (Exception error)
+        {
+            GD.Print("Background Steam version check skipped: " + error.GetType().Name + ": " + error.Message);
+        }
+    }
+
     /// <summary>The Game version row: asks Steam which builds it has now, then shows the version screen, with the game here even if Steam cannot be reached.</summary>
     private void ShowManage() =>
         RunAsync(null, "Asking Steam which versions it has...", _ => Task.CompletedTask, CheckVersionsAsync).FireAndForget("Game version");
