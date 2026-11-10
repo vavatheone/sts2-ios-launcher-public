@@ -38,7 +38,18 @@ public sealed class SteamLoginSession : IDisposable
 
     public SteamConnection Connection => _connection ?? throw new InvalidOperationException("Not signed in.");
 
-    public ulong SteamId => Connection.Client.SteamID?.ConvertToUInt64() ?? throw new InvalidOperationException("No authenticated Steam ID.");
+    /// <summary>Creates the Steam service object without connecting; online services connect only when first used.</summary>
+    public SteamConnection GetConnectionForServices()
+    {
+        if (!_credentials.HasCredentials) throw new InvalidOperationException("Steam sign-in required.");
+        return _connection ??= new SteamConnection(_credentials.AccountName!, _credentials.RefreshToken!, _logger);
+    }
+
+    public bool HasCachedOwnership => _credentials.HasVerifiedOwnership;
+
+    public ulong SteamId => _credentials.VerifiedSteamId
+        ?? Connection.Client.SteamID?.ConvertToUInt64()
+        ?? throw new InvalidOperationException("No authenticated Steam ID.");
 
     public string AccountName => _credentials.AccountName ?? throw new InvalidOperationException("Not signed in.");
 
@@ -46,7 +57,7 @@ public sealed class SteamLoginSession : IDisposable
     /// The name the game shows for the local player: the account's Steam name, as other players see it, or the sign-in's account
     /// name if Steam has not sent it.
     /// </summary>
-    public string PlayerName => Connection.PersonaName ?? AccountName;
+    public string PlayerName => _credentials.VerifiedPlayerName ?? Connection.PersonaName ?? AccountName;
 
     public bool HasStoredCredentials => _credentials.HasCredentials;
 
@@ -136,7 +147,10 @@ public sealed class SteamLoginSession : IDisposable
     }
 
     public Task<bool> VerifyOwnershipAsync(CancellationToken cancellationToken) =>
-        OwnershipVerifier.VerifyAsync(Connection).WaitAsync(cancellationToken);
+        HasCachedOwnership ? Task.FromResult(true) : VerifyLiveOwnershipAsync(cancellationToken);
+
+    private Task<bool> VerifyLiveOwnershipAsync(CancellationToken cancellationToken) =>
+        OwnershipVerifier.VerifyAsync(GetConnectionForServices()).WaitAsync(cancellationToken);
 
     public async Task ConnectAndVerifyAsync(CancellationToken cancellationToken)
     {
@@ -151,7 +165,7 @@ public sealed class SteamLoginSession : IDisposable
             {
                 // The connection's first sign-in blocks its caller; keep it off the UI thread.
                 // Connecting can hold that thread for its whole timeout, and Back should not wait for it.
-                owns = await Task.Run(() => VerifyOwnershipAsync(cancellationToken), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+                owns = await Task.Run(() => VerifyLiveOwnershipAsync(cancellationToken), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
                 break;
             }
             // A server that does not answer says nothing about the account or the network: the next connection tries another.
@@ -168,7 +182,11 @@ public sealed class SteamLoginSession : IDisposable
             }
         }
         if (!owns) throw new UnauthorizedAccessException("The signed-in Steam account does not own Slay the Spire 2.");
-        if (SteamId == 0) throw new InvalidOperationException("Steam did not provide an authenticated account identity.");
+        ulong steamId = Connection.Client.SteamID?.ConvertToUInt64()
+            ?? throw new InvalidOperationException("Steam did not provide an authenticated account identity.");
+        string playerName = Connection.PersonaName ?? AccountName;
+        if (!_credentials.SaveVerifiedIdentity(steamId, playerName))
+            _logger.Warn("Credentials", "Steam ownership was verified, but the identity could not be persisted for offline launch.");
     }
 
     /// <summary>
