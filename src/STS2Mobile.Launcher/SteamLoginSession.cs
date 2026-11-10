@@ -47,6 +47,8 @@ public sealed class SteamLoginSession : IDisposable
 
     public bool HasCachedOwnership => _credentials.HasVerifiedOwnership;
 
+    public bool IsConnected => _connection?.IsConnected == true;
+
     public ulong SteamId => _credentials.VerifiedSteamId
         ?? Connection.Client.SteamID?.ConvertToUInt64()
         ?? throw new InvalidOperationException("No authenticated Steam ID.");
