@@ -406,7 +406,6 @@ public partial class Launcher : Control
         _gameStarted = true;
         _view.Hide();
         CheckVersionsInBackgroundAsync().FireAndForget("Background Steam version check");
-        CheckVersionsInBackgroundAsync().FireAndForget("Background Steam version check");
         GD.Print("The game reached its main menu.");
         SessionStats.Mark("main-menu");
     }
